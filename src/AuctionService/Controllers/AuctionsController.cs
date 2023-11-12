@@ -7,6 +7,8 @@ using AuctionService.DTOs;
 using AuctionService.Entities;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
+using Contracts;
+using MassTransit;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -18,10 +20,13 @@ namespace AuctionService.Controllers
     {
         private readonly AuctionDbContext _context;
         private readonly IMapper _mapper;
-        public AuctionsController(AuctionDbContext context, IMapper mapper)
+        private readonly IPublishEndpoint _publishEndpoint;
+
+        public AuctionsController(AuctionDbContext context, IMapper mapper, IPublishEndpoint publishEndpoint)
         {
             _context = context;
             _mapper = mapper;
+            _publishEndpoint = publishEndpoint;
         }
 
         [HttpGet]
@@ -67,7 +72,11 @@ namespace AuctionService.Controllers
 
             _context.Auctions.Add(auction);
 
+            var newAuction = _mapper.Map<AuctionDto>(auction);
+            await _publishEndpoint.Publish(_mapper.Map<AuctionCreated>(newAuction));
+
             var results = await _context.SaveChangesAsync() > 0;
+            
             if(!results)
             {
                 return BadRequest("Could not save changes to the DB!");
@@ -96,6 +105,8 @@ namespace AuctionService.Controllers
             auction.Item.Color = updateAuctionDto.Color ?? auction.Item.Color;
             auction.Item.Mileage = updateAuctionDto.Mileage ?? auction.Item.Mileage;
 
+            await _publishEndpoint.Publish(_mapper.Map<AuctionUpdated>(auction));
+
             var result = await _context.SaveChangesAsync() > 0;
 
             if(result)
@@ -119,6 +130,7 @@ namespace AuctionService.Controllers
             // ToDo: Check for user authentication for Delete operation
             _context.Auctions.Remove(auction);
 
+            await _publishEndpoint.Publish<AuctionDeleted>(new {Id = auction.Id.ToString()});
             var result = await _context.SaveChangesAsync() > 0;
 
             if(result)
